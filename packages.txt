@@ -8,8 +8,7 @@ luci-ssl
 luci-theme-bootstrap
 luci-i18n-base-zh-cn
 luci-app-commands
-# 若 luci-app-filetransfer 不存在导致编译失败，注释掉即可
-luci-app-filetransfer
+# luci-app-filetransfer  # 23.05中不存在此包，已注释
 
 # ---------- 脚本运行依赖 ----------
 curl
@@ -19,7 +18,6 @@ bash
 coreutils-stat
 coreutils-md5sum
 coreutils-timeout
-busybox-ntpdate
 aria2
 
 # ---------- WiFi 相关 ----------
@@ -31,7 +29,7 @@ cryptsetup
 block-mount
 blkid
 e2fsprogs
-util-linux
+lsblk
 xxd
 file
 
@@ -47,7 +45,6 @@ kmod-usb3
 kmod-usb2
 
 # ---------- 文件传输 ----------
-luci-app-tinyfm
 openssh-sftp-server
 
 # ---------- WiFi 破解 ----------
