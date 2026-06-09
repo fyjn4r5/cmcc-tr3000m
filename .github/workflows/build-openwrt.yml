@@ -3,6 +3,7 @@ name: Build OpenWrt 23.05 for CMCC RAX3000M
 on:
   push:
     branches: [ "main", "master" ]
+    tags: [ "*" ]
   workflow_dispatch:
     inputs:
       version:
