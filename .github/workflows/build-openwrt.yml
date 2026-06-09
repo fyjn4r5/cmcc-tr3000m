@@ -1,4 +1,4 @@
-name: Build OpenWrt 23.05 for CMCC TR3000M
+name: Build OpenWrt 23.05 for CMCC RAX3000M
 
 on:
   push:
@@ -12,12 +12,12 @@ on:
       profile:
         description: '设备型号'
         required: true
-        default: 'cmcc_tr3000m'
+        default: 'cmcc_rax3000m'
 
 env:
   OPENWRT_VERSION: ${{ github.event.inputs.version || '23.05.5' }}
   TARGET: "mediatek/filogic"
-  PROFILE: ${{ github.event.inputs.profile || 'cmcc_tr3000m' }}
+  PROFILE: ${{ github.event.inputs.profile || 'cmcc_rax3000m' }}
 
 jobs:
   build:
@@ -86,9 +86,9 @@ jobs:
       - name: Upload firmware artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: openwrt-${{ env.PROFILE }}-${{ env.OPENWRT_VERSION }}-squashfs
+          name: openwrt-${{ env.PROFILE }}-${{ env.OPENWRT_VERSION }}
           path: |
-            ${{ env.IB_DIR }}/bin/targets/**/*-squashfs*
+            ${{ env.IB_DIR }}/bin/targets/**/openwrt-*-${{ env.PROFILE }}*
             ${{ env.IB_DIR }}/bin/targets/**/*.manifest
             ${{ env.IB_DIR }}/build.log
 
