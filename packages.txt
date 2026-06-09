@@ -47,7 +47,8 @@ kmod-usb2
 # ---------- 文件传输 ----------
 openssh-sftp-server
 
-# ---------- WiFi 破解（可选） ----------
-# hcxdumptool
-# hcxtools
-# tcpdump
+# ---------- WiFi 破解 ----------
+aircrack-ng
+hcxdumptool
+hcxtools
+tcpdump
