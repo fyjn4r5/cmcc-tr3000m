@@ -1,0 +1,53 @@
+# ============================================================
+# OpenWrt 23.05 固件软件包清单 - CMCC TR3000M
+# 以 # 开头的行将被忽略（可取消注释按需启用）
+# ============================================================
+
+# ---------- Luci Web UI ----------
+luci-ssl
+luci-theme-bootstrap
+luci-i18n-base-zh-cn
+luci-app-commands
+luci-app-tinyfm
+
+# ---------- 脚本运行依赖 ----------
+curl
+python3-base
+bc
+bash
+coreutils-stat
+coreutils-md5sum
+coreutils-timeout
+busybox-ntpdate
+
+# ---------- WiFi 相关 ----------
+iwinfo
+wireless-tools
+
+# ---------- USB 自动挂载 & VeraCrypt ----------
+cryptsetup
+block-mount
+blkid
+e2fsprogs
+util-linux
+xxd
+file
+
+# ---------- 文件系统支持 ----------
+kmod-fs-exfat
+kmod-fs-ntfs3
+kmod-fs-vfat
+kmod-fs-ext4
+
+# ---------- USB 驱动 ----------
+kmod-usb-storage
+kmod-usb3
+kmod-usb2
+
+# ---------- 文件传输 ----------
+openssh-sftp-server
+
+# ---------- WiFi 破解（可选） ----------
+# hcxdumptool
+# hcxtools
+# tcpdump

@@ -1,0 +1,337 @@
+#!/bin/sh
+
+# 定义VeraCrypt分区密码和PIM设置
+password="${VERACRYPT_PASSWORD:-xxxxxxxxxxxxxxx@gmail.xxxxxxxxxxxxxxx!!!}"  # 建议从安全位置读取
+pim="${VERACRYPT_PIM:-0}"  # 默认 PIM=0
+
+# 环境变量
+action=${ACTION}
+devname=${DEVNAME}
+subsystem=${SUBSYSTEM}
+
+# 自定义变量
+mount_base="/mnt"
+log_file="/var/log/usb-mount.log"
+mapper_base="vc_"
+
+# 日志记录函数
+log() {
+    echo "$(date): $1" >> "$log_file"
+}
+
+# 查找脚本函数（支持多种命名）
+find_routerhub_script() {
+    local dir="$1"
+    local script=""
+    
+    # 优先查找 RouterHub*.sh（新版）
+    script=$(find "$dir" -maxdepth 1 -type f -name 'RouterHub*.sh' 2>/dev/null | head -n1)
+    [ -n "$script" ] && echo "$script" && return 0
+    
+    # 查找 路由通*.sh（旧版兼容）
+    script=$(find "$dir" -maxdepth 1 -type f -name '*路由通*.sh' 2>/dev/null | head -n1)
+    [ -n "$script" ] && echo "$script" && return 0
+    
+    return 1
+}
+
+# 查找脚本所在目录
+find_routerhub_dir() {
+    local dir="$1"
+    local script=""
+    
+    # 优先查找 RouterHub*.sh（新版）
+    script=$(find "$dir" -maxdepth 2 -type f -name 'RouterHub*.sh' 2>/dev/null | head -n1)
+    [ -n "$script" ] && dirname "$script" && return 0
+    
+    # 查找 路由通*.sh（旧版兼容）
+    script=$(find "$dir" -maxdepth 2 -type f -name '*路由通*.sh' 2>/dev/null | head -n1)
+    [ -n "$script" ] && dirname "$script" && return 0
+    
+    return 1
+}
+
+# 检查必要工具
+check_requirements() {
+    for cmd in cryptsetup blkid dd lsblk sync xxd file; do
+        if ! command -v "$cmd" >/dev/null 2>&1; then
+            log "错误：$cmd 未安装"
+            return 1
+        fi
+    done
+    return 0
+}
+
+# 检查设备是否为 VeraCrypt 加密卷
+is_veracrypt() {
+    local device=$1
+    log "检查 $device 是否为 VeraCrypt 加密卷"
+    
+    if ! dd if="$device" bs=1 count=1 >/dev/null 2>&1; then
+        log "$device 不可读，跳过"
+        return 1
+    fi
+    
+    local blkid_output
+    blkid_output=$(blkid -o value -s TYPE "$device" 2>/dev/null)
+    if [ -n "$blkid_output" ]; then
+        log "$device 被 blkid 识别为文件系统类型：$blkid_output，不是 VeraCrypt 加密卷"
+        return 1
+    fi
+
+    file_output=$(file -s "$device")
+    if echo "$file_output" | grep -q ": data$"; then
+        echo "发现VeraCrypt加密分区: $device (基于 file 检测)"
+        return 0
+    fi
+
+    dd if="$device" bs=512 count=1 2>/dev/null | xxd -l 16 | grep -q "00000000:.*[^0]"
+    if [ $? -eq 0 ]; then
+        log "发现VeraCrypt加密分区: $device (基于头部检测)"
+        return 0
+    else
+        log "$device 不是 VeraCrypt 加密卷"
+        return 1
+    fi
+}
+
+# 尝试解密 VeraCrypt 设备
+try_decrypt_veracrypt() {
+    local dev_path="$1"
+    local mapper_name="$2"
+
+    if [ -e "/dev/mapper/$mapper_name" ]; then
+        log "映射设备 /dev/mapper/$mapper_name 已存在，跳过解密"
+        return 0
+    fi
+
+    if ! is_veracrypt "$dev_path"; then
+        log "$dev_path 不是 VeraCrypt 加密卷，跳过解密"
+        return 1
+    fi
+
+    log "尝试解密 VeraCrypt 设备 $dev_path (PIM=$pim)"
+    if command -v timeout >/dev/null 2>&1; then
+        timeout 20s sh -c "echo \"$password\" | cryptsetup --type tcrypt open \"$dev_path\" \"$mapper_name\" --veracrypt-pim=\"$pim\" 2>>$log_file"
+    else
+        echo "$password" | cryptsetup --type tcrypt open "$dev_path" "$mapper_name" --veracrypt-pim="$pim" 2>>"$log_file"
+    fi
+    sync
+
+    if [ $? -eq 0 ]; then
+        log "成功解密 $dev_path 到 /dev/mapper/$mapper_name"
+        return 0
+    else
+        log "解密 $dev_path 失败，可能密码或 PIM 错误"
+        return 1
+    fi
+}
+
+# 挂载并检查 RouterHub 脚本
+mount_and_check_routerhub() {
+    local dev_path="$1"
+    local is_encrypted="$2"
+    local part_name=$(basename "$dev_path")
+    local mount_point="$mount_base/$part_name"
+    local dev_to_mount="$dev_path"
+
+    if [ "$is_encrypted" -eq 1 ]; then
+        local mapper_name="${mapper_base}${part_name}"
+        dev_to_mount="/dev/mapper/$mapper_name"
+    fi
+
+    # 判断文件系统类型
+    local filesystem
+    filesystem=$(blkid -o value -s TYPE "$dev_to_mount" 2>/dev/null)
+    if [ -z "$filesystem" ] && [ "$is_encrypted" -eq 0 ]; then
+        local header_data
+        header_data=$(dd if="$dev_path" bs=512 count=1 2>/dev/null | xxd -p -l 512 2>/dev/null)
+        if [ -z "$header_data" ] || ! echo "$header_data" | grep -q -E '[^0]'; then
+            log "$dev_path 无文件系统且头部数据全零，可能是无效分区，跳过挂载"
+            return 1
+        fi
+        filesystem="ext4"
+    fi
+    case "$filesystem" in
+        exfat) filesystem="exfat" ;;
+        ntfs) filesystem="ntfs-3g" ;;
+        vfat) filesystem="vfat" ;;
+        *) filesystem="ext4" ;;
+    esac
+
+    # 创建挂载点
+    mkdir -p "$mount_point"
+
+    # 设置挂载参数
+    local mount_opts="rw"
+    case "$filesystem" in
+        vfat|exfat) mount_opts="rw,uid=1000,gid=1000,iocharset=utf8" ;;
+        ntfs-3g) mount_opts="rw,uid=1000,gid=1000,locale=en_US.UTF-8" ;;
+        ext4) mount_opts="rw" ;;
+        *) mount_opts="rw" ;;
+    esac
+
+    # 检查是否已挂载
+    if mount | grep -q "$mount_point"; then
+        log "挂载点 $mount_point 已存在，跳过挂载 $dev_to_mount"
+        return 0
+    fi
+
+    # 挂载分区
+    log "挂载 $dev_to_mount 到 $mount_point"
+    mount -t "$filesystem" -o "$mount_opts" "$dev_to_mount" "$mount_point"
+    if [ $? -ne 0 ]; then
+        log "挂载 $dev_to_mount 到 $mount_point 失败"
+        rmdir "$mount_point"
+        return 1
+    fi
+    sync
+
+    # 查找脚本（支持 RouterHub*.sh 和 *路由通*.sh）
+    local script_dir
+    script_dir=$(find_routerhub_dir "$mount_point")
+    
+    if [ -n "$script_dir" ]; then
+        local script_path
+        script_path=$(find_routerhub_script "$mount_point")
+        
+        if [ -n "$script_path" ]; then
+            chmod +x "$script_path" || log "无法为 $script_path 添加执行权限"
+            log "找到 RouterHub 脚本：$script_path，执行脚本"
+            cd "$script_dir" || return 1
+            export LANG=en_US.UTF-8
+            bash "$script_path"
+            sync
+            log "执行 $script_path 完成，清理挂载点和映射"
+            cleanup "$dev_path"
+            return 0
+        fi
+    fi
+
+    log "未找到 RouterHub 脚本在 $mount_point"
+    cleanup "$dev_path"
+    return 0
+}
+
+# 卸载和清理
+cleanup() {
+    local dev_path="$1"
+    local part_name=$(basename "$dev_path")
+    local mount_point="$mount_base/$part_name"
+    local mapper_name="${mapper_base}${part_name}"
+    local max_attempts=3
+    local attempt=1
+
+    if mount | grep -q "$mount_point"; then
+        log "卸载 $mount_point"
+        while [ $attempt -le $max_attempts ]; do
+            umount "$mount_point" 2>>"$log_file" && break
+            log "卸载 $mount_point 失败，第 $attempt 次尝试"
+            sleep 1
+            attempt=$((attempt + 1))
+        done
+        if [ $attempt -gt $max_attempts ]; then
+            log "卸载 $mount_point 失败，尝试强制卸载"
+            umount -l "$mount_point" 2>>"$log_file" || log "强制卸载 $mount_point 失败"
+        fi
+        rmdir "$mount_point" 2>/dev/null
+        log "卸载 $mount_point 完成"
+    fi
+
+    if [ -e "/dev/mapper/$mapper_name" ]; then
+        log "关闭 VeraCrypt 映射 $mapper_name"
+        cryptsetup close "$mapper_name" 2>>"$log_file" || log "关闭 $mapper_name 失败"
+    fi
+}
+
+# 扫描已连接的USB设备（用于开机前插入的情况）
+scan_existing_usb() {
+    log "扫描已连接的USB设备..."
+    
+    for dev in /dev/sd[a-z]; do
+        if [ -b "$dev" ]; then
+            # 获取最后一个分区
+            local last_partition=$(lsblk -l -o NAME "$dev" 2>/dev/null | grep -E "^${dev##*/}[0-9]+$" | tail -n1 | awk '{print "/dev/"$1}')
+            local dev_to_process="$dev"
+            
+            if [ -n "$last_partition" ]; then
+                dev_to_process="$last_partition"
+            fi
+            
+            if [ -n "$dev_to_process" ] && [ -b "$dev_to_process" ]; then
+                log "处理已存在设备：$dev_to_process"
+                part_name=$(basename "$dev_to_process")
+                mapper_name="${mapper_base}${part_name}"
+                
+                if try_decrypt_veracrypt "$dev_to_process" "$mapper_name"; then
+                    mount_and_check_routerhub "$dev_to_process" 1
+                fi
+            fi
+        fi
+    done
+}
+
+# 主逻辑
+case "$action" in
+    add)
+        log "处理设备：action=$action, devname=$devname, subsystem=$subsystem"
+
+        if ! echo "$devname" | grep -qE "^sd[a-z]"; then
+            log "设备 $devname 不是 sd 开头，跳过"
+            exit 0
+        fi
+
+        check_requirements || exit 1
+
+        if [ ! -b "/dev/$devname" ]; then
+            log "错误：/dev/$devname 不是有效的块设备"
+            exit 1
+        fi
+
+        dev_list="/dev/$devname"
+        if echo "$devname" | grep -qE "^sd[a-z]$"; then
+            last_partition=$(lsblk -l -o NAME /dev/$devname | grep -E "^${devname}[0-9]+$" | tail -n 1 | awk '{print "/dev/"$1}')
+            if [ -n "$last_partition" ]; then
+                dev_list="$last_partition"
+            else
+                dev_list="/dev/$devname"  
+            fi
+        fi
+
+        for dev_path in $dev_list; do
+            part_name=$(basename "$dev_path")
+            mapper_name="${mapper_base}${part_name}"
+            log "处理设备 $dev_path"
+
+            if try_decrypt_veracrypt "$dev_path" "$mapper_name"; then
+                mount_and_check_routerhub "$dev_path" 1
+            fi
+        done
+        ;;
+    boot)
+        # 开机时扫描已连接的USB设备
+        log "开机扫描已连接的USB设备..."
+        check_requirements || exit 1
+        
+        # 自动添加到 rc.local（如果未添加）
+        local rc_local="/etc/rc.local"
+        local boot_cmd="ACTION=boot /etc/hotplug.d/block/$(basename "$0")"
+        if [ -f "$rc_local" ]; then
+            if ! grep -q "$boot_cmd" "$rc_local" 2>/dev/null; then
+                log "自动添加到 rc.local 启动项..."
+                sed -i '/exit 0/d' "$rc_local" 2>/dev/null
+                echo "" >> "$rc_local"
+                echo "$boot_cmd" >> "$rc_local"
+                echo "exit 0" >> "$rc_local"
+                log "已添加启动项：$boot_cmd"
+            fi
+        fi
+        
+        scan_existing_usb
+        ;;
+    remove)
+        log "处理移除设备：$devname"
+        cleanup "/dev/$devname"
+        sync
+        ;;
+esac

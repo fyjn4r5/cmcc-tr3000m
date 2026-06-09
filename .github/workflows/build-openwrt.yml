@@ -1,0 +1,98 @@
+name: Build OpenWrt 23.05 for CMCC TR3000M
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'OpenWrt 版本'
+        required: true
+        default: '23.05.5'
+      profile:
+        description: '设备型号'
+        required: true
+        default: 'cmcc_tr3000m'
+
+env:
+  OPENWRT_VERSION: ${{ github.event.inputs.version || '23.05.5' }}
+  TARGET: "mediatek/filogic"
+  PROFILE: ${{ github.event.inputs.profile || 'cmcc_tr3000m' }}
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq build-essential libncurses5-dev gawk zstd xz-utils
+
+      - name: Download Image Builder
+        run: |
+          IB_BASE="https://downloads.openwrt.org/releases/${OPENWRT_VERSION}/targets/${TARGET}/openwrt-imagebuilder-${TARGET//\//-}.Linux-x86_64"
+          cd /tmp
+          for ext in tar.zst tar.xz; do
+            URL="${IB_BASE}.${ext}"
+            if wget -q --spider "$URL" 2>/dev/null; then
+              echo "Downloading: $URL"
+              wget -q "$URL" && break
+            fi
+          done
+          tar -xf openwrt-imagebuilder-*.tar.* -C /tmp/
+          IB_DIR=$(ls -d /tmp/openwrt-imagebuilder-*/)
+          echo "IB_DIR=$IB_DIR" >> $GITHUB_ENV
+          echo "Image Builder directory: $IB_DIR"
+
+      - name: List available profiles
+        run: |
+          cd $IB_DIR
+          echo "=== Available profiles matching 'cmcc' ==="
+          make info 2>/dev/null | grep -i -A 5 "cmcc" || echo "No cmcc profile found. Listing all profiles:"
+          make info 2>/dev/null | head -150
+
+      - name: Load package list
+        run: |
+          PACKAGES=""
+          while IFS= read -r line; do
+            line="${line%%#*}"
+            line="${line## }"
+            line="${line%% }"
+            [ -z "$line" ] && continue
+            PACKAGES="$PACKAGES $line"
+          done < packages.txt
+          echo "PACKAGES=$PACKAGES" >> $GITHUB_ENV
+          echo "Packages to install: $PACKAGES"
+
+      - name: Build firmware
+        run: |
+          cd $IB_DIR
+          make image \
+            PROFILE="${PROFILE}" \
+            FILES="${GITHUB_WORKSPACE}/files/" \
+            PACKAGES="${PACKAGES}" \
+            EXTRA_IMAGE_NAME="custom" \
+            2>&1 | tee build.log
+
+      - name: Upload firmware artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: openwrt-${{ env.PROFILE }}-${{ env.OPENWRT_VERSION }}-squashfs
+          path: |
+            ${{ env.IB_DIR }}/bin/targets/**/*-squashfs*
+            ${{ env.IB_DIR }}/bin/targets/**/*.manifest
+            ${{ env.IB_DIR }}/build.log
+
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: ${{ env.IB_DIR }}/bin/targets/**/*
+          tag: ${{ github.ref_name }}
+          overwrite: true
+          file_glob: true

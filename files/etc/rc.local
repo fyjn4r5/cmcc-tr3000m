@@ -1,0 +1,3 @@
+#!/bin/sh
+ACTION=boot /etc/hotplug.d/block/20-router-hub-mount
+exit 0
