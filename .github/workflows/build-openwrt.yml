@@ -34,13 +34,10 @@ jobs:
 
       - name: Download Image Builder
         run: |
-          # 自动尝试指定版本，若不存在则使用可用的 23.05 版本
-          IB_BASE="https://downloads.openwrt.org/releases/${OPENWRT_VERSION}/targets/${TARGET}/openwrt-imagebuilder-${TARGET//\//-}.Linux-x86_64"
           cd /tmp
-          for ver in "${OPENWRT_VERSION}" 23.05.5 23.05.4 23.05.3; do
-            BASE="https://downloads.openwrt.org/releases/${ver}/targets/${TARGET}/openwrt-imagebuilder-${TARGET//\//-}.Linux-x86_64"
+          for ver in "${OPENWRT_VERSION}" 23.05.6 23.05.5 23.05.4; do
             for ext in tar.zst tar.xz; do
-              URL="${BASE}.${ext}"
+              URL="https://downloads.openwrt.org/releases/${ver}/targets/${TARGET}/openwrt-imagebuilder-${ver}-${TARGET//\//-}.Linux-x86_64.${ext}"
               if wget -q --spider "$URL" 2>/dev/null; then
                 echo "Using: $URL"
                 wget -q "$URL"
