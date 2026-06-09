@@ -34,15 +34,23 @@ jobs:
 
       - name: Download Image Builder
         run: |
+          # 自动尝试指定版本，若不存在则使用可用的 23.05 版本
           IB_BASE="https://downloads.openwrt.org/releases/${OPENWRT_VERSION}/targets/${TARGET}/openwrt-imagebuilder-${TARGET//\//-}.Linux-x86_64"
           cd /tmp
-          for ext in tar.zst tar.xz; do
-            URL="${IB_BASE}.${ext}"
-            if wget -q --spider "$URL" 2>/dev/null; then
-              echo "Downloading: $URL"
-              wget -q "$URL" && break
-            fi
+          for ver in "${OPENWRT_VERSION}" 23.05.5 23.05.4 23.05.3; do
+            BASE="https://downloads.openwrt.org/releases/${ver}/targets/${TARGET}/openwrt-imagebuilder-${TARGET//\//-}.Linux-x86_64"
+            for ext in tar.zst tar.xz; do
+              URL="${BASE}.${ext}"
+              if wget -q --spider "$URL" 2>/dev/null; then
+                echo "Using: $URL"
+                wget -q "$URL"
+                FOUND_VER="$ver"
+                break 2
+              fi
+            done
           done
+          [ -z "$FOUND_VER" ] && { echo "ERROR: No OpenWrt 23.05 Image Builder found"; exit 1; }
+          echo "OPENWRT_VERSION=$FOUND_VER" >> $GITHUB_ENV
           tar -xf openwrt-imagebuilder-*.tar.* -C /tmp/
           IB_DIR=$(ls -d /tmp/openwrt-imagebuilder-*/)
           echo "IB_DIR=$IB_DIR" >> $GITHUB_ENV
