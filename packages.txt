@@ -8,7 +8,6 @@ luci-ssl
 luci-theme-bootstrap
 luci-i18n-base-zh-cn
 luci-app-commands
-luci-app-tinyfm
 
 # ---------- 脚本运行依赖 ----------
 curl
@@ -45,6 +44,8 @@ kmod-usb3
 kmod-usb2
 
 # ---------- 文件传输 ----------
+luci-app-filetransfer
+luci-app-tinyfm
 openssh-sftp-server
 
 # ---------- WiFi 破解 ----------
